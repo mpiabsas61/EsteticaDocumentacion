@@ -1,0 +1,42 @@
+@startuml
+
+title Diagrama de secuencia - Login
+
+actor web as w
+participant "Api Usuario" as au
+database "users db" as udb
+
+autoactivate on
+== Login ==
+w-[#blue]->au: POST /auth/login -d {email, password}
+
+au-[#red]->udb: SELECT u.id, u.activo, u.password_hash, r.nombre as rol \nFROM usuario u JOIN rol r ON u.rol_id = r.id \nWHERE u.email={email}
+udb-->au: {usuario_id, activo, password_hash, rol} / null
+note left au
+  rol ∈ {'cliente', 'profesional', 'administrador'}
+  (valor tomado de la tabla ROL)
+end note
+
+alt usuario no existe
+  au-[#red]->w: HTTP 401 (unauthorized) {mensaje_error}
+else usuario existe
+  au->au: verifyPassword({password}, {password_hash})
+  au-->au: true / false
+  note left au
+    el hash tiene salt: no se puede buscar
+    por hash, se compara la password
+    contra el hash guardado
+  end note
+
+  alt password inválida
+    au-[#red]->w: HTTP 401 (unauthorized) {mensaje_error}
+  else password válida y activo=false
+    au-[#red]->w: HTTP 403 (forbidden) {mensaje_error: "cuenta deshabilitada"}
+  else password válida y activo=true
+    au->au: createJwt({usuario_id, rol})
+    au-->au: {jwt}
+    au-[#red]->w: HTTP 200 (ok) {JWT}
+  end alt
+end alt
+
+@enduml

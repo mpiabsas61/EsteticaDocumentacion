@@ -1,0 +1,67 @@
+@startuml
+
+title Diagrama de secuencia - Registro de usuarios
+
+actor "Clienta" as c
+actor "Administrador" as a
+participant Web as w
+participant "Api Usuario" as au
+database "users db" as udb
+
+autoactivate on
+
+== Registro de clienta (self-service) ==
+
+c -> w: completar formulario de registro
+w-[#blue]->au: POST /auth/register {nombre, apellido, email, password}
+
+au-[#red]->udb: SELECT id FROM usuario WHERE email={email}
+udb-->au: {usuario} / null
+
+alt email ya registrado
+  au-[#red]->w: HTTP 409 (conflict) {mensaje_error}
+else email disponible
+  au->au: hashPassword({password})
+  au-->au: hash
+  note right au
+    hash con salt aleatorio,
+    se guarda como password_hash
+  end note
+  au-[#red]->udb: INSERT INTO usuario (nombre, apellido, email, password_hash, rol_id) \nVALUES (..., rol_id=(SELECT id FROM rol WHERE nombre='cliente'))
+  udb-->au: {usuario}
+  au->au: createJwt({usuario_id, rol:'cliente'})
+  au-->au: {jwt}
+  au-[#red]->w: HTTP 201 (created) {jwt}
+end
+
+== Alta de profesional o administrador (la realiza un administrador) ==
+
+a -> w: loguearse (obtiene JWT admin)
+a -> w: completar alta de nuevo usuario {nombre, apellido, email, rol}
+w-[#blue]->au: POST /usuarios {..., rol} -h Authorization: {JWT admin}
+
+au-[#red]->udb: SELECT rol FROM usuario WHERE id={admin_id}
+udb-->au: {rol_admin}
+
+alt rol_admin != 'administrador'
+  au-[#red]->w: HTTP 403 (forbidden) {mensaje_error}
+else autorizado
+  alt rol not in ('profesional', 'administrador')
+    au-[#red]->w: HTTP 400 (bad request) {mensaje_error}
+  else rol válido
+    au->au: generarPasswordTemporal()
+    au-->au: {pass_temporal}
+    au->au: hashPassword({pass_temporal})
+    au-->au: hash
+    au-[#red]->udb: INSERT INTO usuario (nombre, apellido, email, password_hash, rol_id) \nVALUES (..., rol_id=(SELECT id FROM rol WHERE nombre={rol}))
+    udb-->au: {usuario}
+    note right au
+      se envía la contraseña temporal
+      por mail al nuevo usuario
+      (fuera del alcance de este diagrama)
+    end note
+    au-[#red]->w: HTTP 201 (created) {usuario}
+  end
+end
+
+@enduml
