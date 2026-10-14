@@ -1,0 +1,64 @@
+@startuml
+
+title Diagrama de secuencia - Cambio/cancelación de turno
+
+actor Usuario as u
+participant Web as w
+participant "API turnos" as apit
+database "DB turnos" as dbt
+
+autoactivate on
+
+u -> w: ver reservas
+w -> apit: GET /reservas -h Authorization: {JWT}
+apit -> apit: verificarJWT({JWT})
+apit --> apit: {usuario_id, rol} / error
+note right apit
+  decodifica, valida firma
+  y expiración localmente
+  (sin llamar a otro microservicio)
+end note
+
+alt JWT válido
+
+  apit -> dbt: SELECT * from turno where usuario_id = {usuario_id}
+  dbt --> apit: {reservas}
+  apit --> w: HTTP 200 {reservas} / HTTP 404 not found
+
+  u -> w: modificar reserva
+  w -> apit: PATCH /reserva/{id} {date_time}
+  apit -> dbt: SELECT * from turno where id={id} and usuario_id={usuario_id}
+  dbt --> apit: {turno}
+
+  alt turno encontrado y pertenece al usuario
+    apit -> dbt: UPDATE disponibilidad set ocupado=False where id={turno.disponibilidad_id}
+    dbt --> apit: OK
+    apit -> dbt: UPDATE disponibilidad set ocupado=True where id={nueva_disponibilidad_id}
+    dbt --> apit: OK
+    apit -> dbt: UPDATE turno set date_time={date_time}, disponibilidad_id={nueva_disponibilidad_id} WHERE id={id}
+    dbt --> apit: OK
+    apit --> w: HTTP 200 {reserva modificada}
+  else turno no encontrado / no pertenece al usuario
+    apit --> w: HTTP 404 not found
+  end
+
+  u -> w: cancelar reserva
+  w -> apit: PATCH /reserva/{id} {estado: 'cancelado'}
+  apit -> dbt: SELECT * from turno where id={id} and usuario_id={usuario_id}
+  dbt --> apit: {turno}
+
+  alt turno encontrado y pertenece al usuario
+    apit -> dbt: UPDATE turno set estado='cancelado' WHERE id={id}
+    dbt --> apit: OK
+    apit -> dbt: UPDATE disponibilidad set ocupado=False where id={turno.disponibilidad_id}
+    dbt --> apit: OK
+    apit --> w: HTTP 200 {reserva cancelada}
+  else turno no encontrado / no pertenece al usuario
+    apit --> w: HTTP 404 not found
+  end
+
+else JWT inválido
+  apit --> w: HTTP 401 unauthorized {error}
+end
+
+@enduml

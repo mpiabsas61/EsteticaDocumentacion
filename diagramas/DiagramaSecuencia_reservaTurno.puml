@@ -1,0 +1,76 @@
+@startuml
+
+title Diagrama de secuencia - Crear reserva de turno
+
+actor Usuario as u
+participant Web as w
+participant "API de reservas" as apir
+database "BD de reservas" as dbr
+
+autoactivate on
+
+u -> w: Crear reserva de turno
+w -> apir: (interacción inicia, JWT ya disponible en el front)
+apir -> apir: verificarJWT({jwt})
+apir --> apir: {usuario_id, rol} / error
+
+alt JWT válido
+
+  u -> w: Seleccionar servicio
+  w -> apir: GET /servicios
+  apir -> dbr: Consultar servicios disponibles
+  dbr --> apir: Lista de servicios
+  apir --> w: HTTP 200 {servicios}
+  w --> u: Mostrar servicios
+
+  u -> w: Seleccionar servicio
+  w -> apir: GET /profesionales?servicio={idServicio}
+  apir -> dbr: Consultar profesionales asociados al servicio
+  dbr --> apir: Profesionales disponibles
+  apir --> w: HTTP 200 {profesionales}
+  w --> u: Mostrar profesionales
+
+  u -> w: Seleccionar profesional
+  u -> w: Seleccionar fecha
+  w -> apir: GET /disponibilidad {servicio, profesional, fecha}
+  apir -> dbr: Consultar disponibilidad profesional + servicio + fecha
+  dbr --> apir: Horarios disponibles
+  apir --> w: HTTP 200 {horarios}
+  w --> u: Mostrar horarios disponibles
+
+  u -> w: Seleccionar horario
+  w -> apir: POST /reservas {servicio, profesional, fecha, horario}
+  apir -> apir: Validar datos de la reserva
+
+  alt Datos con formato incorrecto
+    apir --> w: HTTP 400 Bad Request {error}
+  else Datos correctos
+
+    apir -> dbr: Validar servicio
+    dbr --> apir: Servicio válido / error
+
+    apir -> dbr: GET /profesionales/{id}/servicios/{idServicio}
+    dbr -> dbr: Verificar relación Profesional-Servicio
+    dbr --> apir: Relación válida / error
+
+    apir -> dbr: Validar fecha y horario
+    dbr --> apir: Disponible / no disponible
+
+    alt Reserva válida y disponible
+      apir -> dbr: UPDATE disponibilidad SET ocupado=true WHERE id={disponibilidad_id}
+      dbr --> apir: OK
+      apir -> dbr: INSERT INTO turno (usuario_id, profesional_servicio_id, disponibilidad_id, fecha_hora, estado) \nVALUES ({usuario_id}, ..., 'pendiente')
+      dbr --> apir: {reserva}
+      apir --> w: HTTP 201 Created {reserva}
+      w --> u: Mostrar confirmación de turno
+    else Error de negocio
+      apir --> w: HTTP 422 Unprocessable Entity {error}
+    end
+
+  end
+
+else JWT inválido
+  apir --> w: HTTP 401 Unauthorized {error}
+end
+
+@enduml
